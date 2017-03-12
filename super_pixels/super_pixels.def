@@ -1,0 +1,2 @@
+LIBRARY super_pixels
+EXPORTS mexFunction

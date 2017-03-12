@@ -1,0 +1,2 @@
+LIBRARY rgbhist_diff
+EXPORTS mexFunction

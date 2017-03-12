@@ -1,0 +1,2 @@
+LIBRARY cross_bilateral
+EXPORTS mexFunction

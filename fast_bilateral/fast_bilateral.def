@@ -1,0 +1,2 @@
+LIBRARY	"fast_bilateral"
+EXPORTS mexFunction

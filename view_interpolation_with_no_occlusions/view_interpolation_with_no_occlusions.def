@@ -1,0 +1,2 @@
+LIBRARY view_interpolation_with_no_occlusions
+EXPORTS mexFunction

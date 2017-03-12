@@ -1,0 +1,2 @@
+LIBRARY get_nonlocal_laplacian
+EXPORTS mexFunction

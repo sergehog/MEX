@@ -1,0 +1,2 @@
+LIBRARY translate_dibr
+EXPORTS mexFunction

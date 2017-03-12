@@ -1,0 +1,2 @@
+LIBRARY sparse_icp
+EXPORTS mexFunction

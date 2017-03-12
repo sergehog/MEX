@@ -1,0 +1,2 @@
+LIBRARY hash_weights
+EXPORTS mexFunction

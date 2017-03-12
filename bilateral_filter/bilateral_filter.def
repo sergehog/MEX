@@ -1,0 +1,7 @@
+; mexFunction.def : Declares the module parameters for the DLL.
+
+LIBRARY      "bilateral_filter"
+
+EXPORTS
+    ; Explicit exports can go here
+    mexFunction

@@ -1,0 +1,2 @@
+LIBRARY optical_cost
+EXPORTS mexFunction

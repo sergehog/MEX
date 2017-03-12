@@ -1,0 +1,2 @@
+LIBRARY simplified_bilateral
+EXPORTS mexFunction

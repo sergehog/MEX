@@ -1,0 +1,2 @@
+LIBRARY compressive_inpainting
+EXPORTS mexFunction

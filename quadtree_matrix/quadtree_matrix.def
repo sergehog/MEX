@@ -1,0 +1,2 @@
+LIBRARY quadtree_matrix
+EXPORTS mexFunction

@@ -1,0 +1,7 @@
+; mexFunction.def : Declares the module parameters for the DLL.
+
+LIBRARY      "render_channel"
+
+EXPORTS
+    ; Explicit exports can go here
+    mexFunction

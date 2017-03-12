@@ -1,0 +1,2 @@
+LIBRARY	"cross_nl_means"
+EXPORTS mexFunction

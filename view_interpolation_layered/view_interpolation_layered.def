@@ -1,0 +1,2 @@
+LIBRARY view_interpolation_layered
+EXPORTS mexFunction

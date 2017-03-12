@@ -1,0 +1,811 @@
+/**
+*	@file get_nonlocal_laplacian.cpp
+*	@date 02.10.2015
+*	@author Sergey Smirnov <sergey.smirnov@tut.fi>
+*/
+
+#include "../common/meximage.h"
+#include "../get_laplacian/sparse_matrix.h"
+#include <float.h>
+#include <cmath>
+#include <atomic>
+//#include <algorithm>
+#include <vector>
+#include <memory>
+#include <Eigen\Dense>
+
+#ifdef __cplusplus 
+extern "C" {
+#include "mex.h"
+}
+#endif // __cplusplus
+#ifndef _DEBUG
+#include <omp.h>
+#endif
+
+#ifdef WIN32
+#define isnan _isnan
+#endif
+
+#pragma comment (lib, "libeng.lib") 
+#pragma comment (lib, "libmx.lib")
+#pragma comment (lib, "libmex.lib")
+
+//#define IsNonZero(d) ((d)!=0.0)
+//#define colors 3
+
+using namespace mymex;
+using namespace Eigen;
+
+#define diameter (radius*2 + 1)
+#define window (diameter*diameter)
+
+#ifndef OLD_VERSION
+
+template<int radius>
+static void compute_adjustency(sparseEntry * const entries, MexImage<uint8_t> &Image, MexImage<bool> &ProcessArea, MexImage<long> &Nonlocals, const size_t elements_num, const double sigma, const int nonlocals);
+
+template<int radius, int colors>
+static void compute_color_nonlocals(sparseEntry * const triplets, const MexImage<uint8_t> &Image, const MexImage<bool> &ProcessArea, MexImage<long> &Nonlocals, const size_t elements_num, const double sigma, const int nonlocals);
+
+template<int radius, int colors, int nonlocals>
+static void compute_color_adjustency(sparseEntry * const triplets, const MexImage<uint8_t> &Image, const MexImage<bool> &ProcessArea, MexImage<long> &Nonlocals, const size_t elements_num, const double sigma)
+{
+	const int height = Image.height;
+	const int width = Image.width;
+	const int HW = Image.layer_size;
+
+	// in order to parallelize further processing, let's write all indexes in a separate array
+	std::vector<long> elements(elements_num);
+	for (long i = 0, j = 0; i < HW; i++)
+	{
+		const int x = i / height;
+		const int y = i % height;
+
+		if (!ProcessArea[i])
+		{
+			continue;
+		}
+		elements[j] = i;
+		j++;
+	}
+	Eigen::Matrix<double, window, window> I0 = Eigen::Matrix<double, window, window>::Identity();
+	Eigen::Matrix<double, window, window> I = Eigen::Matrix<double, window, window>::Identity();
+	I0(window - 1, window - 1) = 0.0;
+
+
+#pragma omp parallel 
+	{
+		Eigen::Matrix<double, window, window> F;
+		Matrix<double, window, colors> Xi;
+		//for (int i = 0; i < window; i++)
+		//{
+		//	Xi(i, colors) = 1.0;
+		//}
+
+#pragma omp for //schedule(dynamic)
+		for (long je = 0; je < elements_num; je++)
+		{
+			const long index = elements[je];
+			const int x = index / height;
+			const int y = index % height;
+
+			// data matrix
+			#pragma omp parallel for
+			for (int i = 0; i < window; i++)
+			{
+				const int dx = i / diameter - radius;
+				const int dy = i % diameter - radius;
+				const int xi = x + dx;
+				const int yi = y + dy;
+				for (int c = 0; c < colors; c++)
+				{
+					Xi(i, c) = double(Image(xi, yi, c)) / 255;
+				}
+			}
+
+			for (int i1 = 0; i1 < window; i1++)
+			{
+				F(i1, i1) = 1.0;
+				for (int i2 = i1 + 1; i2 < window; i2++)
+				{
+					double diff = 0.0;
+					for (int c = 0; c < colors; c++)
+					{
+						diff += (Xi(i1, c) - Xi(i2, c)) * (Xi(i1, c) - Xi(i2, c));
+					}
+
+					const double value = exp(-diff / sigma);
+					F(i1, i2) = value;
+					F(i2, i1) = value;
+				}
+			}
+			F = (I - F).transpose() * (I - F); // normalization
+
+
+			long k = je*window*window;
+			for (int i = 0; i < window; i++)
+			{
+				const int dxi = i / diameter - radius;
+				const int dyi = i % diameter - radius;
+				const long indexi = (x + dxi)*height + (y + dyi);
+
+				for (int j = 0; j < window; j++, k++)
+				{
+					const int dxj = j / diameter - radius;
+					const int dyj = j % diameter - radius;
+					const long indexj = (x + dxj)*height + (y + dyj);
+					triplets[k].value = F(i, j);
+					triplets[k].row = indexj;
+					triplets[k].col = indexi;
+				}
+			}
+
+			////#pragma omp parallel for
+			//long k = je*(window*window + nonlocals);
+			//for (int i = 0; i < window; i++)
+			//{
+			//	const int dx = i / diameter - radius;
+			//	const int dy = i % diameter - radius;
+			//	const int xi = x + dx;
+			//	const int yi = y + dy;
+			//	const long indexi = xi * height + yi;
+			//	for (int j = 0; j < window; j++)
+			//	{
+			//		const int djx = j / diameter - radius;
+			//		const int djy = j % diameter - radius;
+			//		const int xj = x + djx;
+			//		const int yj = y + djy;
+			//		const long indexj = xj * height + yj;
+
+			//		float diff = 0.f;
+			//		for (int c = 0; c < colors; c++)
+			//		{
+			//			diff += abs(float(Image(xj, yj, c)) - float(Image(xi, yi, c)));
+			//		}
+			//		const float value = exp(-diff / (colors*sigma));
+
+			//		triplets[k].value = value;
+			//		triplets[k].row = indexi;
+			//		triplets[k].col = indexj;
+			//		k++;
+			//	}		
+			//}
+
+			//for (int i = 0; i < nonlocals; i++)
+			//{
+			//	if (Nonlocals(x, y, i) >= 0)
+			//	{
+			//		triplets[k].value = 1;
+			//		triplets[k].row = Nonlocals(x, y, i);
+			//		triplets[k].col = index;
+			//	}
+			//	else
+			//	{
+			//		triplets[k].value = 0;
+			//		triplets[k].row = index;
+			//		triplets[k].col = index;
+			//	}
+			//	k++;				
+			//}
+		}
+	}
+}
+
+void mexFunction(int nout, mxArray* output[], int in, const mxArray* input[])
+{
+#ifndef _DEBUG
+	omp_set_num_threads(std::max<int>(8, omp_get_max_threads()));
+	omp_set_dynamic(std::max<int>(4, omp_get_max_threads() / 2));;
+#endif	
+
+	if (in < 2 || in > 6 || nout != 1 || mxGetClassID(input[0]) != mxUINT8_CLASS || mxGetClassID(input[1]) != mxUINT8_CLASS)
+	{
+		mexErrMsgTxt("USAGE: [L] = get_nonlocal_laplacian(uint8(I), uint8(Trimap), <radius, nonlocals, search, sigma>);\n");
+	}
+
+	MexImage<uint8_t> Image(input[0]);
+	MexImage<uint8_t> Trimap(input[1]);
+	const int radius = in > 2 ? std::max<int>(1, int(mxGetScalar(input[2]))) : 2;
+	const int nonlocals = in > 3 ? std::max<int>(0, int(mxGetScalar(input[3]))) : 3;
+	const int search = std::max<int>(radius + 1, in > 4 ? int(mxGetScalar(input[4])) : 10);
+	const double sigma = in > 5 ? std::max<double>(0.0, mxGetScalar(input[5])) : 0.0;
+	//const double lambda = in > 6 ? std::max<double>(0.0, mxGetScalar(input[6])) : 0.0000001;
+	//const double c = in > 5 ? std::max<double>(0.000001, mxGetScalar(input[5])) : 800.0;
+
+	const int height = Image.height;
+	const int width = Image.width;
+	const int HW = Image.layer_size;
+	//const int colors = Image.layers;	
+
+	MexImage<long> Nonlocals(width, height, nonlocals);
+	MexImage<float> NonlocalErrors(width, height, nonlocals);	
+	NonlocalErrors.setval(FLT_MAX);
+
+
+	int const searchDiameter = search * 2 + 1;
+	int const searchWindow = searchDiameter*searchDiameter;
+	if (nonlocals > 0)
+	{		
+#pragma omp parallel for
+		for (long i = 0; i < HW; i++) 
+		{
+			// pre-fill nonlocals with error codes 
+			const int x = i / height;
+			const int y = i % height;
+			for (int n = 0; n < nonlocals; n++)
+			{
+				Nonlocals(x, y, n) = -1;
+			}
+		}
+
+#pragma omp parallel
+		{
+			MexImage<float> Error(width, height);
+#pragma omp for
+			for (int w = 0; w < searchWindow; w++)
+			{
+				const int dx = w / searchDiameter - search;
+				const int dy = w % searchDiameter - search;
+				if (abs(dx) <= radius && abs(dy) <= radius)
+				{
+					continue;
+				}
+#pragma omp parallel for
+				for (long i = 0; i < HW; i++)
+				{
+					const int x = i / height;
+					const int y = i % height;
+					const int xs = (x + dx) < 0 ? 0 : ((x + dx) >= width ? width - 1 : (x + dx));
+					const int ys = (y + dy) < 0 ? 0 : ((y + dy) >= height ? height - 1 : (y + dy));
+					float err = 0.f;
+					for (int c = 0; c < Image.layers; c++)
+					{
+						err += abs(float(Image(x, y, c)) - float(Image(xs, ys, c)));
+					}
+					Error(x, y) = err;
+				}
+
+				Error.IntegralImage(true);
+
+#pragma omp parallel for
+				for (long i = 0; i < HW; i++)
+				{
+					const int x = i / height;
+					const int y = i % height;
+					const int xs = (x + dx) < 0 ? 0 : ((x + dx) >= width ? width - 1 : (x + dx));
+					const int ys = (y + dy) < 0 ? 0 : ((y + dy) >= height ? height - 1 : (y + dy));
+					const long indexS = xs * height + ys;
+					if (xs < radius || xs >= window - radius || ys < radius || ys >= window - radius)
+					{						
+						continue;
+					}
+					long index = indexS;
+					float value = Error.getIntegralAverage(x, y, radius);
+					for (int n = 0; n < nonlocals; n++)
+					{
+						if (value < NonlocalErrors(x, y, n))
+						{
+							float tmp = NonlocalErrors(x, y, n);
+							long tmpI = Nonlocals(x, y, n);
+							NonlocalErrors(x, y, n) = value;
+							Nonlocals(x, y, n) = index;
+							index = tmpI;
+							value = tmp;
+						}
+					}
+				}
+			}
+		}
+	}
+	MexImage<bool> ProcessArea(width, height);
+	ProcessArea.setval(0);
+
+#pragma omp parallel for schedule(dynamic)
+	for (long i = 0; i < HW; i++)
+	{
+		const int x = i / height;
+		const int y = i % height;
+		
+		if (Trimap(x, y) != 0 && Trimap(x, y) != 2 && Trimap(x, y) != 255)
+		{
+			for (int xi = std::max<int>(radius, x - radius); xi <= std::min<int>(width - radius - 1, x + radius); xi++)
+			{
+				for (int yi = std::max<int>(radius, y - radius); yi <= std::min<int>(height - radius - 1, y + radius); yi++)
+				{
+					ProcessArea(xi, yi) = true;
+				}
+			}
+		}
+	}
+
+	// number of pixels, used for adjastency calculation
+	size_t elements_num = 0;
+#pragma omp parallel for reduction(+: elements_num)
+	for (long i = 0; i < HW; i++)
+	{
+		elements_num += ProcessArea[i];
+	}
+
+	
+	size_t const tlen = elements_num*(window*window + nonlocals);
+	std::unique_ptr<sparseEntry[]> entries(new sparseEntry[tlen]);// tlen);
+	switch (radius)
+	{
+	case 1: compute_adjustency<1>(entries.get(), Image, ProcessArea, Nonlocals, elements_num, sigma, nonlocals); break;
+	//case 2: compute_adjustency<2>(entries.get(), Image, ProcessArea, Nonlocals, elements_num, sigma, nonlocals); break;
+	//case 3: compute_adjustency<3>(entries.get(), Image, ProcessArea, Nonlocals, elements_num, sigma, nonlocals); break;
+	//case 4: compute_adjustency<4>(entries.get(), Image, ProcessArea, Nonlocals, elements_num, sigma, nonlocals); break;
+	default: mexErrMsgTxt("radius is too big. \n");
+	}	
+
+	output[0] = mxCreateSparse(HW, HW, size_t( tlen / 2.5 ), mxComplexity::mxREAL);
+
+	double* const vals = mxGetPr(output[0]);
+	mwIndex * const row_inds = mxGetIr(output[0]);
+	mwIndex * const col_inds = mxGetJc(output[0]);
+
+	fillSparseMatrix(entries.get(), tlen, vals, row_inds, col_inds, HW);
+
+	entries.reset();
+	mexPrintf("Number of non-empty entries: %d (allocated %d) \n", col_inds[HW], size_t(tlen / 2.5));
+}
+
+template<int radius>
+static void compute_adjustency(sparseEntry * const entries, MexImage<uint8_t> &Image, MexImage<bool> &ProcessArea, MexImage<long> &Nonlocals, const size_t elements_num, const double sigma, const int nonlocals)
+{
+	switch (Image.layers)
+	{
+		//case 1: compute_color_nonlocals<radius, 1>(entries, Image, ProcessArea, Nonlocals, elements_num, sigma, nonlocals); break;
+		//case 2: compute_color_nonlocals<radius, 2>(entries, Image, ProcessArea, Nonlocals, elements_num, sigma, nonlocals); break;
+		case 3: compute_color_nonlocals<radius, 3>(entries, Image, ProcessArea, Nonlocals, elements_num, sigma, nonlocals); break;
+		//case 4: compute_color_nonlocals<radius, 4>(entries, Image, ProcessArea, Nonlocals, elements_num, sigma, nonlocals); break;
+		//case 5: compute_color_nonlocals<radius, 5>(entries, Image, ProcessArea, Nonlocals, elements_num, sigma, nonlocals); break;
+		//case 6: compute_color_nonlocals<radius, 6>(entries, Image, ProcessArea, Nonlocals, elements_num, sigma, nonlocals); break;
+		//case 7: compute_color_nonlocals<radius, 7>(entries, Image, ProcessArea, Nonlocals, elements_num, sigma, nonlocals); break;
+		//case 8: compute_color_nonlocals<radius, 8>(entries, Image, ProcessArea, Nonlocals, elements_num, sigma, nonlocals); break;				
+		default: mexErrMsgTxt("Too many colors in your image \n");
+	}
+}
+
+template<int radius, int colors>
+static void compute_color_nonlocals(sparseEntry * const triplets, const MexImage<uint8_t> &Image, const MexImage<bool> &ProcessArea, MexImage<long> &Nonlocals, const size_t elements_num, const double trick_sigma, const int nonlocals)
+{
+	switch (nonlocals)
+	{
+	case 0: compute_color_adjustency<radius, colors, 0>(triplets, Image, ProcessArea, Nonlocals, elements_num, trick_sigma); break;
+	case 1: compute_color_adjustency<radius, colors, 1>(triplets, Image, ProcessArea, Nonlocals, elements_num, trick_sigma); break;
+	//case 2: compute_color_adjustency<radius, colors, 2>(triplets, Image, ProcessArea, Nonlocals, elements_num, trick_sigma); break;
+	//case 3: compute_color_adjustency<radius, colors, 3>(triplets, Image, ProcessArea, Nonlocals, elements_num, trick_sigma); break;
+	//case 4: compute_color_adjustency<radius, colors, 4>(triplets, Image, ProcessArea, Nonlocals, elements_num, trick_sigma); break;
+	//case 5: compute_color_adjustency<radius, colors, 5>(triplets, Image, ProcessArea, Nonlocals, elements_num, trick_sigma); break;
+	//case 6: compute_color_adjustency<radius, colors, 6>(triplets, Image, ProcessArea, Nonlocals, elements_num, trick_sigma); break;
+	//case 7: compute_color_adjustency<radius, colors, 7>(triplets, Image, ProcessArea, Nonlocals, elements_num, trick_sigma); break;
+	//case 8: compute_color_adjustency<radius, colors, 8>(triplets, Image, ProcessArea, Nonlocals, elements_num, trick_sigma); break;
+	//case 9: compute_color_adjustency<radius, colors, 9>(triplets, Image, ProcessArea, Nonlocals, elements_num, trick_sigma); break;
+	//case 10: compute_color_adjustency<radius, colors, 10>(triplets, Image, ProcessArea, Nonlocals, elements_num, trick_sigma); break;
+	default: mexErrMsgTxt("Too many nonlocals");
+	}	
+}
+
+#else
+template<int radius>
+static void compute_adjustency(sparseEntry * const entries, MexImage<uint8_t> &Image, MexImage<bool> &ProcessArea, MexImage<long> &Nonlocals, const size_t elements_num, const double lambda, const double trick_sigma, const int nonlocals);
+
+template<int radius, int colors>
+static void compute_color_nonlocals(sparseEntry * const triplets, const MexImage<uint8_t> &Image, const MexImage<bool> &ProcessArea, MexImage<long> &Nonlocals, const size_t elements_num, const double lambda, const double trick_sigma, const int nonlocals);
+
+template<int radius, int colors, int nonlocals>
+static void compute_color_adjustency(sparseEntry * const triplets, const MexImage<uint8_t> &Image, const MexImage<bool> &ProcessArea, MexImage<long> &Nonlocals, const size_t elements_num, const double lambda, const double trick_sigma);
+
+template<int radius, int colors, int nonlocals, bool trick>
+void compute_alpha_trick(sparseEntry * const triplets, const MexImage<uint8_t> &Image, const MexImage<bool> &ProcessArea, MexImage<long> &Nonlocals, const size_t elements_num, const double lambda, const double trick_sigma)
+{
+	const int height = Image.height;
+	const int width = Image.width;
+	const int HW = Image.layer_size;
+
+	// in order to parallelize further processing, let's write all indexes in a separate array
+	std::vector<long> elements(elements_num);
+	for (long i = 0, j = 0; i < HW; i++)
+	{
+		const int x = i / height;
+		const int y = i % height;
+
+		if (!ProcessArea[i])
+		{
+			continue;
+		}
+		elements[j] = i;
+		j++;
+	}
+	Eigen::Matrix<double, window*(1 + nonlocals), window*(1 + nonlocals)> I0 = Eigen::Matrix<double, window*(1 + nonlocals), window*(1 + nonlocals)>::Identity();
+	Eigen::Matrix<double, window*(1 + nonlocals), window*(1 + nonlocals)> I = Eigen::Matrix<double, window*(1 + nonlocals), window*(1 + nonlocals)>::Identity();
+	I0(window*(1 + nonlocals) - 1, window*(1 + nonlocals) - 1) = 0.0;
+
+#pragma omp parallel 
+	{
+		Eigen::Matrix<double, window*(1 + nonlocals), window*(1 + nonlocals)> F;
+		Matrix<double, window*(1+nonlocals), colors + 3> Xi;
+		for (int i = 0; i < window*(1 + nonlocals); i++)
+		{
+			Xi(i, colors+2) = 1.0;
+		}
+
+#pragma omp for //schedule(dynamic)
+		for (long je = 0; je < elements_num; je++)
+		{
+			const long index = elements[je];
+			const int x = index / height;
+			const int y = index % height;
+
+			// data matrix
+#pragma omp parallel for
+			for (int i = 0; i < window; i++)
+			{
+				const int dx = i / diameter - radius;
+				const int dy = i % diameter - radius;
+				const int xi = x + dx;
+				const int yi = y + dy;
+				for (int c = 0; c < colors; c++)
+				{
+					Xi(i, c) = double(Image(xi, yi, c)) / 255;
+				}
+				Xi(i, colors) = double(xi) / width;
+				Xi(i, colors + 1) = double(yi) / height;
+				for (int n = 0; n < nonlocals; n++)
+				{
+					const long indexN = Nonlocals(x, y, n);
+					const int xN = indexN / height;
+					const int yN = indexN % height;
+					const int xNi = (xN + dx) < 0 ? 0 : (xN + dx >= width ? width - 1 : xN + dx);
+					const int yNi = (yN + dy) < 0 ? 0 : (yN + dy >= height ? height - 1 : yN + dy);
+					for (int c = 0; c < colors; c++)
+					{
+						Xi(window*(n + 1) + i, c) = double(Image(xNi, yNi, c)) / 255;
+					}
+					Xi(window*(n + 1) + i, colors) = double(xNi) / width;
+					Xi(window*(n + 1) + i, colors + 1) = double(yNi) / height;					
+				}
+			}
+
+			if (trick)
+			{
+				for (int i1 = 0; i1 < window*(1 + nonlocals); i1++)
+				{
+					F(i1, i1) = 1.0;
+					for (int i2 = i1 + 1; i2 < window*(1 + nonlocals); i2++)
+					{
+						double diff = 0.0;
+						for (int c = 0; c < colors+2 ; c++)
+						{
+							diff += (Xi(i1, c) - Xi(i2, c)) * (Xi(i1, c) - Xi(i2, c));
+						}
+
+						const double value = exp(-diff / trick_sigma);
+						F(i1, i2) = value;
+						F(i2, i1) = value;
+					}
+				}
+			}
+			else
+			{
+				F = (Xi*Xi.transpose());
+			}
+
+			F = F * ((F + I0*lambda).inverse()); // fenmu = F + I0*lambda;
+			F = (I - F).transpose() * (I - F); // normalization
+
+
+			long k = je*window*window*(1 + nonlocals)*(1 + nonlocals);
+			for (int i = 0; i < window*(1 + nonlocals); i++)
+			{
+				const int nA = i < window ? -1 : (i / window) - 1;
+				const int ii = i < window ? i : i - (nA+1)*window;
+				const int dxi = ii / diameter - radius;
+				const int dyi = ii % diameter - radius;
+				const long indexA = i < window ? index : Nonlocals(x, y, nA);
+				const int xA = indexA / height;
+				const int yA = indexA % height;
+				const long indexi = (xA + dxi)*height + (yA + dyi);
+
+				for (int j = 0; j < window*(1 + nonlocals); j++, k++)
+				{
+					const int nB = j < window ? -1 : (j / window) - 1;
+					const int jj = j < window ? j : j - (nB + 1)*window;
+					const int dxj = jj / diameter - radius;
+					const int dyj = jj % diameter - radius;
+
+					//const int dxj = j / diameter - radius;
+					//const int dyj = j % diameter - radius;
+					const long indexB = j < window ? index : Nonlocals(x, y, nB);
+					const int xB = indexB / height;
+					const int yB = indexB % height;
+					const long indexj = (xB + dxj)*height + (yB + dyj);
+
+					triplets[k].value = F(i, j);
+					triplets[k].row = indexj;
+					triplets[k].col = indexi;
+				}
+			}
+		}
+	}
+}
+
+
+
+void mexFunction(int nout, mxArray* output[], int in, const mxArray* input[])
+{
+#ifndef _DEBUG
+	omp_set_num_threads(std::max<int>(8, omp_get_max_threads()));
+	omp_set_dynamic(std::max<int>(4, omp_get_max_threads() / 2));;
+#endif	
+
+	if (in < 2 || in > 7 || nout != 1 || mxGetClassID(input[0]) != mxUINT8_CLASS || mxGetClassID(input[1]) != mxUINT8_CLASS)
+	{
+		mexErrMsgTxt("USAGE: [L] = get_nonlocal_laplacian(uint8(I), uint8(Trimap), <radius, nonlocals, search, kernel_trick_sigma, lambda>);\n");
+	}
+
+	MexImage<uint8_t> Image(input[0]);
+	MexImage<uint8_t> Trimap(input[1]);
+	const int radius = in > 2 ? std::max<int>(1, int(mxGetScalar(input[2]))) : 2;
+	const int nonlocals = in > 3 ? std::max<int>(0, int(mxGetScalar(input[3]))) : 3;
+	const int search = std::max<int>(radius + 1, in > 4 ? int(mxGetScalar(input[4])) : 10);
+	const double trick_sigma = in > 5 ? std::max<double>(0.0, mxGetScalar(input[5])) : 0.0;
+	const double lambda = in > 6 ? std::max<double>(0.0, mxGetScalar(input[6])) : 0.0000001;
+	//const double c = in > 5 ? std::max<double>(0.000001, mxGetScalar(input[5])) : 800.0;
+
+	const int height = Image.height;
+	const int width = Image.width;
+	const int HW = Image.layer_size;
+	//const int colors = Image.layers;	
+
+
+	MexImage<long> Nonlocals(width, height, nonlocals);
+	MexImage<float> NonlocalErrors(width, height, nonlocals);	
+	NonlocalErrors.setval(FLT_MAX);
+	
+
+	int const searchDiameter = search * 2 + 1;
+	int const searchWindow = searchDiameter*searchDiameter;
+	if (nonlocals > 0)
+	{		
+		#pragma omp parallel for
+		for (long i = 0; i < HW; i++) 
+		{
+			// pre-fill nonlocals with same patches, to ensure stabe work even for very-very bad case 
+			const int x = i / height;
+			const int y = i % height;
+			for (int n = 0; n < nonlocals; n++)
+			{
+				Nonlocals(x, y, n) = i;
+			}
+		}
+
+		#pragma omp parallel
+		{
+			MexImage<float> Error(width, height);
+			#pragma omp for
+			for (int w = 0; w < searchWindow; w++)
+			{
+				const int dx = w / searchDiameter - search;
+				const int dy = w % searchDiameter - search;
+				if (abs(dx) <= radius && abs(dy) <= radius)
+				{
+					continue;
+				}
+				#pragma omp parallel for
+				for (long i = 0; i < HW; i++)
+				{
+					const int x = i / height;
+					const int y = i % height;
+					const int xs = (x + dx) < 0 ? 0 : ((x + dx) >= width ? width - 1 : (x + dx));
+					const int ys = (y + dy) < 0 ? 0 : ((y + dy) >= height ? height - 1 : (y + dy));
+					float err = 0.f;
+					for (int c = 0; c < Image.layers; c++)
+					{
+						err += abs(float(Image(x, y, c)) - float(Image(xs, ys, c)));
+					}
+					Error(x, y) = err;
+				}
+
+				Error.IntegralImage(true);
+				
+				#pragma omp parallel for
+				for (long i = 0; i < HW; i++)
+				{
+					const int x = i / height;
+					const int y = i % height;
+					const int xs = (x + dx) < 0 ? 0 : ((x + dx) >= width ? width - 1 : (x + dx));
+					const int ys = (y + dy) < 0 ? 0 : ((y + dy) >= height ? height - 1 : (y + dy));
+					const long indexS = xs * height + ys;
+					if (xs < radius || xs >= window - radius || ys < radius || ys >= window - radius)
+					{						
+						continue;
+					}
+					long index = indexS;
+					float value = Error.getIntegralAverage(x, y, radius);
+					for (int n = 0; n < nonlocals; n++)
+					{
+						if (value < NonlocalErrors(x, y, n))
+						{
+							float tmp = NonlocalErrors(x, y, n);
+							long tmpI = Nonlocals(x, y, n);
+							NonlocalErrors(x, y, n) = value;
+							Nonlocals(x, y, n) = index;
+							index = tmpI;
+							value = tmp;
+						}
+					}
+				}
+			}
+		}
+	}
+	MexImage<bool> ProcessArea(width, height);
+	ProcessArea.setval(0);
+
+#pragma omp parallel for schedule(dynamic)
+	for (long i = 0; i < HW; i++)
+	{
+		const int x = i / height;
+		const int y = i % height;
+		//if (Trimap(x, y) == 0)
+		if (Trimap(x, y) != 0 || Trimap(x, y) != 2 || Trimap(x, y) != 255)
+		{
+			//C.coeffRef(i, i) = 0.0;
+			//vals(i) = 0.0;
+
+			for (int xi = std::max<int>(radius, x - radius); xi <= std::min<int>(width - radius - 1, x + radius); xi++)
+			{
+				for (int yi = std::max<int>(radius, y - radius); yi <= std::min<int>(height - radius - 1, y + radius); yi++)
+				{
+					ProcessArea(xi, yi) = true;
+				}
+			}
+		}
+		//else
+		//{
+		//C.coeffRef(i, i) = c;
+		//vals(i) = double(Trimap(x, y))*c;
+		//}
+	}
+
+	// number of pixels, used for adjastency calculation
+	size_t elements_num = 0;
+#pragma omp parallel for reduction(+: elements_num)
+	for (long i = 0; i < HW; i++)
+	{
+		elements_num += ProcessArea[i];
+	}
+
+	//// required pixels in a single array for brtter parallalization
+	//std::vector<long> elements;
+	//long j = 0;
+	//for (long i = 0; i < HW; i++)
+	//{
+	//	const int x = i / height;
+	//	const int y = i % height;
+
+	//	if (x < radius || x >= width - radius || y < radius || y >= height - radius || !ProcessArea[i])
+	//	{
+	//		continue;
+	//	}
+	//	elements.push_back(i);
+	//	j++;
+	//}
+
+	//const long elements_num = j;
+	//std::unique_ptr<Eigen::Triplet<double>[]> triplets(new Eigen::Triplet<double>[window*window*elements_num]);
+
+	//std::vector<sparseEntry> entries(10);// tlen);
+	//size_t tlen;
+	// number of adjastency elements in "entries" (some of them will be summed up)
+	size_t const tlen = elements_num*window*window*(1 + nonlocals)*(1 + nonlocals);
+	std::unique_ptr<sparseEntry[]> entries(new sparseEntry[tlen]);// tlen);
+
+	if (radius == 1)
+	{
+		compute_adjustency<1>(entries.get(), Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma, nonlocals);
+	}
+	else if (radius == 2)
+	{
+		compute_adjustency<2>(entries.get(), Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma, nonlocals);
+	}
+	//else if (radius == 3)
+	//{
+	//	compute_adjustency<3>(entries.get(), Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma, nonlocals);
+	//}
+	else
+	{
+		mexErrMsgTxt("radius is too big. \n");
+		//compute_adjustency<4>(entries.get(), Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma, nonlocals);
+	}
+
+
+	output[0] = mxCreateSparse(HW, HW, size_t(tlen / 2.5), mxComplexity::mxREAL);
+
+	double* const vals = mxGetPr(output[0]);
+	mwIndex * const row_inds = mxGetIr(output[0]);
+	mwIndex * const col_inds = mxGetJc(output[0]);
+
+	fillSparseMatrix(entries.get(), tlen, vals, row_inds, col_inds, HW);
+
+	entries.reset();
+	mexPrintf("Number of non-empty entries: %d (allocated %d) \n", col_inds[HW], size_t(tlen / 2.5));
+}
+
+#define LAYERS(L) if (Image.layers == (L)) compute_color_nonlocals<radius, (L)>(entries, Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma, nonlocals); else
+template<int radius>
+static void compute_adjustency(sparseEntry * const entries, MexImage<uint8_t> &Image, MexImage<bool> &ProcessArea, MexImage<long> &Nonlocals, const size_t elements_num, const double lambda, const double trick_sigma, const int nonlocals)
+{
+	//LAYERS(2)
+	LAYERS(3)
+		LAYERS(4)
+		LAYERS(5)
+		LAYERS(6)
+		//LAYERS(7)
+		//LAYERS(8)
+		//LAYERS(9)
+		//LAYERS(10)
+		//LAYERS(11)
+		//LAYERS(12)
+		//LAYERS(13)
+		//LAYERS(14)
+		//LAYERS(15)
+		//LAYERS(16)
+		//LAYERS(17)
+		//LAYERS(18)
+		//LAYERS(19)
+		//LAYERS(20)
+		mexErrMsgTxt("Too many colors in your image \n");
+}
+template<int radius, int colors>
+static void compute_color_nonlocals(sparseEntry * const triplets, const MexImage<uint8_t> &Image, const MexImage<bool> &ProcessArea, MexImage<long> &Nonlocals, const size_t elements_num, const double lambda, const double trick_sigma, const int nonlocals)
+{
+	if (nonlocals == 0)
+	{
+		compute_color_adjustency<radius, colors, 0>(triplets, Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma);
+	}
+	else if (nonlocals == 1)
+	{
+		compute_color_adjustency<radius, colors, 1>(triplets, Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma);
+	}
+	else if (nonlocals == 2)
+	{
+		compute_color_adjustency<radius, colors, 2>(triplets, Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma);
+	}
+	//else if (nonlocals == 3)
+	//{
+	//	compute_color_adjustency<radius, colors, 3>(triplets, Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma);
+	//}
+	//else if (nonlocals == 4)
+	//{
+	//	compute_color_adjustency<radius, colors, 4>(triplets, Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma);
+	//}
+	//else if (nonlocals == 5)
+	//{
+	//	compute_color_adjustency<radius, colors, 5>(triplets, Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma);
+	//}
+	//else if (nonlocals == 6)
+	//{
+	//	compute_color_adjustency<radius, colors, 6>(triplets, Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma);
+	//}
+	else
+	{
+		mexErrMsgTxt("Too many nonlocals");
+	}
+}
+
+template<int radius, int colors, int nonlocals>
+static void compute_color_adjustency(sparseEntry * const triplets, const MexImage<uint8_t> &Image, const MexImage<bool> &ProcessArea, MexImage<long> &Nonlocals, const size_t elements_num, const double lambda, const double trick_sigma)
+{
+	if (isnan(trick_sigma) || trick_sigma == 0.0)
+	{
+		compute_alpha_trick<radius, colors, nonlocals, 0>(triplets, Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma);
+	}
+	else
+	{
+		compute_alpha_trick<radius, colors, nonlocals, 1>(triplets, Image, ProcessArea, Nonlocals, elements_num, lambda, trick_sigma);
+	}
+}
+#endif

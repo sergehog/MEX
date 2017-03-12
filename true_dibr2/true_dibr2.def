@@ -1,0 +1,3 @@
+LIBRARY true_dibr2
+EXPORTS mexFunction
+

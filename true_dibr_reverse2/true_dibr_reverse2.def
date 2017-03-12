@@ -1,0 +1,2 @@
+LIBRARY true_dibr_reverse2
+EXPORTS mexFunction

@@ -1,0 +1,2 @@
+LIBRARY learning_matting
+EXPORTS mexFunction

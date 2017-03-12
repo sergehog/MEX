@@ -1,0 +1,2 @@
+LIBRARY bilateral_matting
+EXPORTS mexFunction

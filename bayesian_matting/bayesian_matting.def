@@ -1,0 +1,2 @@
+LIBRARY bayesian_matting
+EXPORTS mexFunction

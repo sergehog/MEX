@@ -1,0 +1,2 @@
+LIBRARY color_range_filter_new
+EXPORTS mexFunction

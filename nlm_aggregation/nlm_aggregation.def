@@ -1,0 +1,2 @@
+LIBRARY nlm_aggregation
+EXPORTS mexFunction

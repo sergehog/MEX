@@ -1,0 +1,2 @@
+LIBRARY cross_wavelet
+EXPORTS mexFunction

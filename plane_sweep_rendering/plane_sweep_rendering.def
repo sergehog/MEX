@@ -1,0 +1,2 @@
+LIBRARY plane_sweep_rendering
+EXPORTS mexFunction

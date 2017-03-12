@@ -1,0 +1,2 @@
+LIBRARY patchmatch10
+EXPORTS mexFunction

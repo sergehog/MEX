@@ -1,0 +1,2 @@
+LIBRARY o1_bilateral_filter
+EXPORTS mexFunction

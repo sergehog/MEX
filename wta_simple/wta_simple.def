@@ -1,0 +1,2 @@
+LIBRARY	"wta_simple"
+EXPORTS mexFunction

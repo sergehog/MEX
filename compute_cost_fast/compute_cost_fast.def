@@ -1,0 +1,3 @@
+LIBRARY compute_cost_fast
+EXPORTS mexFunction
+

@@ -1,0 +1,2 @@
+LIBRARY trinocular_alpha
+EXPORTS mexFunction

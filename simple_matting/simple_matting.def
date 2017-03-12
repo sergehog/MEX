@@ -1,0 +1,2 @@
+LIBRARY simple_matting
+EXPORTS mexFunction

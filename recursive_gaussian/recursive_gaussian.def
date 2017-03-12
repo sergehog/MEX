@@ -1,0 +1,2 @@
+LIBRARY recursive_gaussian
+EXPORTS mexFunction

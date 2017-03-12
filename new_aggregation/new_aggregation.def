@@ -1,0 +1,2 @@
+LIBRARY new_aggregation
+EXPORTS mexFunction

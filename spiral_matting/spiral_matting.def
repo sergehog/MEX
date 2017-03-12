@@ -1,0 +1,2 @@
+LIBRARY spiral_matting
+EXPORTS mexFunction

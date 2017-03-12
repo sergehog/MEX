@@ -1,0 +1,2 @@
+LIBRARY stereoscopic_inpainting
+EXPORTS mexFunction

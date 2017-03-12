@@ -1,0 +1,2 @@
+LIBRARY compessed_stereo
+EXPORTS mexFunction

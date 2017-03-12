@@ -1,0 +1,2 @@
+LIBRARY compute_plane_sweep_cost
+EXPORTS mexFunction

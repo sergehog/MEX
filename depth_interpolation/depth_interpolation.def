@@ -1,0 +1,2 @@
+LIBRARY depth_interpolation
+EXPORTS mexFunction

@@ -1,0 +1,2 @@
+LIBRARY hierarchical_stereo
+EXPORTS mexFunction

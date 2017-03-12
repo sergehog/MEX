@@ -1,29 +1,34 @@
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
+# exclude everything except directory foo/bar
+ipch
+*.opensdf
+*.sdf
+*.suo
+*.dir
+*.vcxproj.*
+*.vcproj.*
+*.sln
+*.ncb
+*.psess
+*.vspx
 *.lib
-
-# Executables
 *.exe
-*.out
-*.app
+Win32
+x64
+Debug
+Release
+MinSizeRel
+RelWithDebInfo
+CMake
+CMakeFiles
+*/CMake*
+*.xcodeproj
+doc
+docs
+eigen
+eigen-bin
+*.cmake
+*.so
+*.obj
+*.VC.db
+*.VC.*
+*.mexw*

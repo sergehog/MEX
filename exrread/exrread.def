@@ -1,0 +1,4 @@
+LIBRARY	"exrread"
+EXPORTS
+    ; Explicit exports can go here
+    mexFunction

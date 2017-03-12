@@ -1,0 +1,2 @@
+LIBRARY left2right
+EXPORTS mexFunction

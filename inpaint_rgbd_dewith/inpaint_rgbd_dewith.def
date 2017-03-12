@@ -1,0 +1,2 @@
+LIBRARY inpaint_rgbd_dewith
+EXPORTS mexFunction

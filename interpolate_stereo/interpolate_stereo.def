@@ -1,0 +1,2 @@
+LIBRARY interpolate_stereo
+EXPORTS mexFunction

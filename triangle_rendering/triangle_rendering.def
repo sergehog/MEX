@@ -1,0 +1,2 @@
+LIBRARY triangle_rendering
+EXPORTS mexFunction

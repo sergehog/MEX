@@ -1,0 +1,2 @@
+LIBRARY inpaint_rgbd_proposed
+EXPORTS mexFunction

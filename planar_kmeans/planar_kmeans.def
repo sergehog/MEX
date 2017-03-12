@@ -1,0 +1,2 @@
+LIBRARY planar_kmeans
+EXPORTS mexFunction

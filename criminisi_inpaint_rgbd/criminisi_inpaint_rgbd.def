@@ -1,0 +1,2 @@
+LIBRARY criminisi_inpaint_rgbd
+EXPORTS mexFunction

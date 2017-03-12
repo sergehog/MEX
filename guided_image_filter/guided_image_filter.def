@@ -1,0 +1,2 @@
+LIBRARY guided_image_filter
+EXPORTS mexFunction

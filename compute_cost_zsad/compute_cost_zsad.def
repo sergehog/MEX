@@ -1,0 +1,2 @@
+LIBRARY	"compute_cost_zsad"
+EXPORTS mexFunction

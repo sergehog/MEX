@@ -1,0 +1,2 @@
+LIBRARY mesh_stereo
+EXPORTS mexFunction

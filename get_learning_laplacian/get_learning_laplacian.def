@@ -1,0 +1,2 @@
+LIBRARY get_learning_laplacian
+EXPORTS mexFunction

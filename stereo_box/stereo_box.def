@@ -1,0 +1,2 @@
+LIBRARY	"stereo_box"
+EXPORTS mexFunction
